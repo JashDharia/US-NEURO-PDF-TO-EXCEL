@@ -14,7 +14,7 @@ export function History() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    fetch('http://localhost:8000/api/history')
+    fetch('/api/history')
       .then(res => res.json())
       .then(data => {
         if (data.status === 'success') setJobs(data.history);

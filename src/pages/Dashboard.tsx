@@ -29,7 +29,7 @@ export function Dashboard() {
 
   useEffect(() => {
     const fetchJobData = (jobId: string) => {
-      fetch(`http://localhost:8000/api/history/${jobId}`)
+      fetch(`/api/history/${jobId}`)
         .then(res => res.json())
         .then(resData => {
           if (resData.status === 'success') {
@@ -56,7 +56,7 @@ export function Dashboard() {
 
     if (!id) {
       // If no ID is given, fetch history and load the most recent job
-      fetch('http://localhost:8000/api/history')
+      fetch('/api/history')
         .then(res => res.json())
         .then(data => {
           if (data.status === 'success' && data.history.length > 0) {

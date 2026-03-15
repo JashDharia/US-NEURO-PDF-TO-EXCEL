@@ -24,7 +24,7 @@ def extract_text_from_pdf(pdf_path: str) -> str:
 
 
 def get_learning_rules() -> str:
-    rules_path = "rules.json"
+    rules_path = "/tmp/rules.json"
     if not os.path.exists(rules_path):
         return ""
     try:

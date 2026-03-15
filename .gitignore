@@ -1,0 +1,26 @@
+# Environment variables — never commit these
+.env
+.env.local
+.env.*.local
+
+# Dependencies
+node_modules/
+api/venv/
+__pycache__/
+*.pyc
+*.pyo
+api/__pycache__/
+
+# Build output
+dist/
+
+# Vercel
+.vercel/
+
+# Local database (use Vercel Postgres in production)
+*.db
+api/history.db
+
+# Misc
+.DS_Store
+*.log

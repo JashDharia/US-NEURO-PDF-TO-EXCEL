@@ -43,7 +43,7 @@ export function ColumnConfigurator({ columns, setColumns, files }: ColumnConfigu
     }
 
     try {
-      const res = await fetch('http://localhost:8000/api/generate-logic', {
+      const res = await fetch('/api/generate-logic', {
         method: 'POST',
         body: formData
       });
