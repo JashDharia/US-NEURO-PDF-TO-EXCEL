@@ -8,9 +8,11 @@ load_dotenv()
 from typing import List
 from pydantic import BaseModel
 import json
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from extractor import process_pdfs_to_excel
 import uvicorn
-import os
 import sqlite3
 import pandas as pd
 from datetime import datetime
