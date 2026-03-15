@@ -21,17 +21,39 @@ import uuid
 # Initialize Database
 DB_PATH = "/tmp/history.db"
 
+def get_db_connection():
+    postgres_url = os.environ.get("POSTGRES_URL") or os.environ.get("POSTGRES_PRISMA_URL") or os.environ.get("POSTGRES_URL_NON_POOLING")
+    if postgres_url:
+        import psycopg2
+        import psycopg2.extras
+        conn = psycopg2.connect(postgres_url)
+        return conn, True # True means it's Postgres
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        return conn, False # False means it's SQLite
+
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn, is_postgres = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS extraction_jobs (
-            id TEXT PRIMARY KEY,
-            created_at TEXT NOT NULL,
-            file_names TEXT NOT NULL,
-            result_json TEXT NOT NULL
-        )
-    ''')
+    if is_postgres:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS extraction_jobs (
+                id VARCHAR(255) PRIMARY KEY,
+                created_at TIMESTAMP NOT NULL,
+                file_names TEXT NOT NULL,
+                result_json TEXT NOT NULL
+            )
+        ''')
+    else:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS extraction_jobs (
+                id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                file_names TEXT NOT NULL,
+                result_json TEXT NOT NULL
+            )
+        ''')
     conn.commit()
     conn.close()
 
@@ -90,12 +112,18 @@ async def extract_pdfs(
         file_names_str = json.dumps([f.filename for f in valid_files])
         current_time = datetime.utcnow().isoformat()
         
-        conn = sqlite3.connect(DB_PATH)
+        conn, is_postgres = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO extraction_jobs (id, created_at, file_names, result_json) VALUES (?, ?, ?, ?)",
-            (job_id, current_time, file_names_str, raw_json_str)
-        )
+        if is_postgres:
+            cursor.execute(
+                "INSERT INTO extraction_jobs (id, created_at, file_names, result_json) VALUES (%s, %s, %s, %s)",
+                (job_id, current_time, file_names_str, raw_json_str)
+            )
+        else:
+            cursor.execute(
+                "INSERT INTO extraction_jobs (id, created_at, file_names, result_json) VALUES (?, ?, ?, ?)",
+                (job_id, current_time, file_names_str, raw_json_str)
+            )
         conn.commit()
         conn.close()
 
@@ -143,9 +171,12 @@ def add_feedback(feedback: Feedback):
 
 @app.get("/api/history")
 def get_history():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
+    conn, is_postgres = get_db_connection()
+    if is_postgres:
+        from psycopg2.extras import RealDictCursor
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+    else:
+        cursor = conn.cursor()
     # Return without the massive result_json payload
     cursor.execute("SELECT id, created_at, file_names FROM extraction_jobs ORDER BY created_at DESC")
     rows = cursor.fetchall()
@@ -162,10 +193,14 @@ def get_history():
 
 @app.get("/api/history/{job_id}")
 def get_history_detail(job_id: str):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM extraction_jobs WHERE id = ?", (job_id,))
+    conn, is_postgres = get_db_connection()
+    if is_postgres:
+        from psycopg2.extras import RealDictCursor
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("SELECT * FROM extraction_jobs WHERE id = %s", (job_id,))
+    else:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM extraction_jobs WHERE id = ?", (job_id,))
     row = cursor.fetchone()
     conn.close()
     

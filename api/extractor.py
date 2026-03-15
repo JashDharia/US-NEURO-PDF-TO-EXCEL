@@ -119,7 +119,7 @@ def process_pdfs_to_excel(pdf_paths: list, columns: list) -> str:
 
         except Exception as e:
             print(f"LLM Extraction Error for {pdf_path}: {e}")
-            fallback_row = {col.get('name', col) if isinstance(col, dict) else col: "Extraction Error" for col in columns}
+            fallback_row = {col.get('name', col) if isinstance(col, dict) else col: f"Extraction Error: {str(e)}" for col in columns}
             fallback_row['Source File'] = os.path.basename(pdf_path)
             all_extracted_data.append(fallback_row)
 
