@@ -274,9 +274,8 @@ async def generate_logic(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# Mangum adapter for Vercel's serverless Python runtime (ASGI → WSGI bridge)
-from mangum import Mangum
-handler = Mangum(app, lifespan="off")
+# Vercel's @vercel/python runtime detects the `app` variable natively as an ASGI app.
+# No Mangum wrapper needed — exposing `app` directly is the correct approach.
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
