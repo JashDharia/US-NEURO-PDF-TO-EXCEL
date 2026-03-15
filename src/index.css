@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-navy: #1d1d4d;
+  --color-brand-blue: #0088cc;
+  --color-brand-orange: #f37021;
+}
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 font-sans;
+  }
+}

@@ -1,0 +1,5 @@
+[
+  {
+    "rule": "Always ensure dates are returned in MM/DD/YYYY format. If the source says 'Feb 12 2024', return '02/12/2024'."
+  }
+]
