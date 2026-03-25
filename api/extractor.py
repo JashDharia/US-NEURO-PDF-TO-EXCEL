@@ -34,11 +34,19 @@ def extract_regex_patterns(text: str) -> dict:
     claim_match = re.search(r'\b(?:Claim|Case)[^\w]{0,10}([A-Z0-9]{5,15})\b', text, re.IGNORECASE)
     if claim_match: found_data["Claim ID"] = claim_match.group(1)
     
-    # Grab the very first date in the document (usually the letter issuance date at the top)
-    # Catches: 12/09/2025, 2025-12-09, Jan 1, 2024, 12.09.2025
-    date_match = re.search(r'\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* \d{1,2},? \d{4}\b|\b\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}\b|\b\d{4}[-/\.]\d{1,2}[-/\.]\d{1,2}\b', text, re.IGNORECASE)
-    if date_match: found_data["Date"] = date_match.group(0)
+    # Extract ALL potential dates from the raw text to ensure the LLM never misses them due to truncation
+    date_pattern = r'\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z\.]*\s*\d{1,2}(?:st|nd|rd|th)?[\s,]+\d{4}\b|\b\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}\b|\b\d{4}[-/\.]\d{1,2}[-/\.]\d{1,2}\b'
+    all_dates = re.findall(date_pattern, text, re.IGNORECASE)
     
+    unique_dates = []
+    for d in all_dates:
+        d_clean = re.sub(r'\s+', ' ', d).strip()
+        if d_clean not in unique_dates:
+            unique_dates.append(d_clean)
+            
+    if unique_dates:
+        found_data["Possible Dates in Document"] = unique_dates[:5]
+        
     return found_data
 
 
