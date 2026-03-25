@@ -34,19 +34,6 @@ def extract_regex_patterns(text: str) -> dict:
     claim_match = re.search(r'\b(?:Claim|Case)[^\w]{0,10}([A-Z0-9]{5,15})\b', text, re.IGNORECASE)
     if claim_match: found_data["Claim ID"] = claim_match.group(1)
     
-    # Extract ALL potential dates from the raw text to ensure the LLM never misses them due to truncation
-    date_pattern = r'\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z\.]*\s*\d{1,2}(?:st|nd|rd|th)?[\s,]+\d{4}\b|\b\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}\b|\b\d{4}[-/\.]\d{1,2}[-/\.]\d{1,2}\b'
-    all_dates = re.findall(date_pattern, text, re.IGNORECASE)
-    
-    unique_dates = []
-    for d in all_dates:
-        d_clean = re.sub(r'\s+', ' ', d).strip()
-        if d_clean not in unique_dates:
-            unique_dates.append(d_clean)
-            
-    if unique_dates:
-        found_data["Possible Dates in Document"] = unique_dates[:5]
-        
     return found_data
 
 
@@ -205,32 +192,33 @@ RULES:
             print(f"Vision API Error: {e}")
             
     else:
-        # Text Chunking logic
-        CHUNK_SIZE = 20000 
-        text_chunks = [text[i:i+CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]
-        
-        # VERCEL TIMEOUT PREVENT: Limit to 1 chunk. (2 chunks takes 15s+, causing 504 Gateway Timeout)
-        for chunk in text_chunks[:1]:
-            full_text_prompt = f"{prompt_instructions}\n\nDOCUMENT TEXT CHUNK:\n{chunk}"
-            messages = [{"role": "user", "content": full_text_prompt}]
+        # VERCEL TIMEOUT PREVENT: Limit to exactly ONE API call per document to stay under 10 seconds.
+        # If the document is huge, elegantly stitch the first 12,000 and last 8,000 characters to preserve Header Dates and Footer Signatures.
+        if len(text) > 20000:
+            chunk = text[:12000] + "\n\n... [SNIP: MIDDLE VERBIAGE REMOVED TO PREVENT TIMEOUT] ...\n\n" + text[-8000:]
+        else:
+            chunk = text
+            
+        full_text_prompt = f"{prompt_instructions}\n\nDOCUMENT TEXT:\n{chunk}"
+        messages = [{"role": "user", "content": full_text_prompt}]
+        try:
+            response = completion(
+                model=selected_model,
+                messages=messages,
+                api_key=api_key,
+                temperature=0.1,
+                response_format={"type": "json_object"},
+            )
+            if hasattr(response, 'usage') and response.usage:
+                total_tokens += response.usage.total_tokens
             try:
-                response = completion(
-                    model=selected_model,
-                    messages=messages,
-                    api_key=api_key,
-                    temperature=0.1,
-                    response_format={"type": "json_object"},
-                )
-                if hasattr(response, 'usage') and response.usage:
-                    total_tokens += response.usage.total_tokens
-                try:
-                    total_cost += completion_cost(completion_response=response)
-                except:
-                    pass
-                content = response.choices[0].message.content.strip()
-                chunk_results.extend(_parse_llm_json(content))
-            except Exception as e:
-                print(f"LLM Chunk Error: {e}")
+                total_cost += completion_cost(completion_response=response)
+            except:
+                pass
+            content = response.choices[0].message.content.strip()
+            chunk_results.extend(_parse_llm_json(content))
+        except Exception as e:
+            print(f"LLM Chunk Error: {e}")
 
     if not chunk_results:
         row = {col_name: "No Data Found or Error" for col_name in col_names}
