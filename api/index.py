@@ -109,7 +109,7 @@ async def extract_pdfs(
             f.write(content)
         temp_paths.append(temp_path)
         
-    combined_hash = "v5_" + hasher.hexdigest()
+    combined_hash = "v6_" + hasher.hexdigest()
         
     try:
         conn, is_postgres = get_db_connection()
@@ -179,6 +179,8 @@ async def extract_pdfs(
         import traceback
         tb = traceback.format_exc()
         print(tb)
+        with open("/tmp/error.log", "w") as f:
+            f.write(tb)
         raise HTTPException(status_code=500, detail=f"Server Error: {str(e)}\nTraceback: {tb}")
     finally:
         for temp_path in temp_paths:

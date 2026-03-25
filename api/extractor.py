@@ -109,16 +109,16 @@ def process_single_pdf(pdf_path: str, columns: list, api_key: str, learning_rule
         regex_hints = extract_regex_patterns(text)
         
         # AGGRESSIVE TOKEN OPTIMIZATION: Paragraph Filtering WITH Date Preservation
-        # Skip filtering entirely for standard 1-4 page docs; 12,000 chars natively costs < $0.0004!
-        if len(text) > 12000:
+        # Skip filtering entirely for standard 1-4 page docs
+        if len(text) > 8000:
             keywords = [col.get('name', col).lower() if isinstance(col, dict) else col.lower() for col in columns]
             keywords.extend(['offer', 'determination', 'idr', 'npi', 'date', 'amount', 'decision', 'patient', 'claim', 'dob', 'dos'])
             
-            # Regex to catch ANY date pattern to prevent N/A (e.g. 01/01/2024 or Jan 1, 2024)
+            # Regex to catch ANY date pattern to prevent N/A
             date_pattern = re.compile(r'\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* \d{1,2},? \d{4}\b', re.IGNORECASE)
-            
-            # Regex to catch Determination Numbers like DISP-1234 or D-5678 to prevent N/A
             det_pattern = re.compile(r'\b(?:disp|det|determination|number)\s*[-#:]?\s*([a-z0-9-]{6,})\b', re.IGNORECASE)
+            idre_pattern = re.compile(r'(Maximus|Livanta|iMPROve Health|IPRO|Island Peer Review|Federal Hearings|FHAS|Provider Resources|C2C Innovative|Lumetra)', re.IGNORECASE)
+            ins_pattern = re.compile(r'(Blue Cross|Blue Shield|BCBS|Aetna|Cigna|United ?Healthcare|UHC|Humana|Centene|Elevance|Anthem|Kaiser|Molina)', re.IGNORECASE)
             
             paragraphs = text.replace('\r', '').split('\n\n')
             if len(paragraphs) < 5:
@@ -126,13 +126,24 @@ def process_single_pdf(pdf_path: str, columns: list, api_key: str, learning_rule
                 
             filtered_paragraphs = []
             for p in paragraphs:
-                # Always keep short structural lines (headers), lines containing keywords, ANY date, or det ID
-                if len(p.strip()) < 100 or date_pattern.search(p) or det_pattern.search(p) or any(k in p.lower() for k in keywords):
+                p_lower = p.lower()
+                keep = False
+                
+                # Extreme speed optimization: Discard lines containing 0 numbers unless they are short headers or match critical regex targets
+                has_numbers = any(char.isdigit() for char in p)
+                
+                if any(k in p_lower for k in keywords): keep = True
+                elif date_pattern.search(p) or det_pattern.search(p): keep = True
+                elif idre_pattern.search(p) or ins_pattern.search(p): keep = True
+                elif has_numbers and ("$" in p or len(p) < 150): keep = True
+                elif len(p.strip()) < 80 and not has_numbers: keep = True # Keep small textual headers
+                
+                if keep:
                     filtered_paragraphs.append(p)
                     
             filtered_text = "\n".join(filtered_paragraphs)
             
-            if len(filtered_text) > 500 and len(filtered_text) < len(text):
+            if len(filtered_text) > 300 and len(filtered_text) < len(text):
                 text = filtered_text
 
     col_names = [col.get('name', col) if isinstance(col, dict) else col for col in columns]
@@ -151,9 +162,10 @@ RULES:
 1. Extract EVERY record (e.g., multiple Determination blocks/line items) — do not stop after the first.
 2. 🚨 CRITICAL DATE RULE 🚨: Find the single global "Date" (e.g. letter issuance date, determination date) at the top of the document. You MUST copy this EXACT Date into EVERY single line item record's "Date" field. DO NOT put "N/A" for Date on some rows and a Date on one row. EVERY row MUST have the Date.
 3. 🚨 DETERMINATION NUMBER RULE 🚨: If the document is a single determination, the Determination Number is "1". If there are multiple line items, number them sequentially "1", "2", "3", etc. NEVER put "N/A" for Determination Number!
-4. Do NOT create a weird isolated extra row just for global header data. 
-5. Keys must exactly match the field names listed above. Use "N/A" for any missing value.
-6. Return ONLY valid JSON — no markdown, no backticks, no commentary."""
+4. 🚨 PREVAILING PARTY RULE 🚨: For "Initiating" and "Non-Initiating" columns: Determine who won. If the Initiating Party (Provider) won, output the letter "X" for Initiating and leave Non-Initiating "N/A". If the Non-Initiating Party (Health Plan) won, put "X" in Non-Initiating and "N/A" in Initiating. Do NOT output numbers! Only "X" or "N/A".
+5. Do NOT create a weird isolated extra row just for global header data. 
+6. Keys must exactly match the field names listed above. Use "N/A" for any missing value.
+7. Return ONLY valid JSON — no markdown, no backticks, no commentary."""
 
     if regex_hints:
          prompt_instructions += f"\n\nPRE-EXTRACTED HIGH-CONFIDENCE FIELDS (Use these if they match your requested fields):\n{json.dumps(regex_hints, indent=2)}"
