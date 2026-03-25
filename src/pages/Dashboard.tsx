@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, BarChart3, TrendingUp, PieChart, Activity, DollarSign, ListFilter } from 'lucide-react';
+import { ArrowLeft, BarChart3, TrendingUp, PieChart, Activity, DollarSign, ListFilter, Zap } from 'lucide-react';
 import PlotComponent from 'react-plotly.js';
 
 // Safe extraction for Vite/ESM default export handling
@@ -86,6 +86,8 @@ export function Dashboard() {
     let totalInsurerOffer = 0;
     let providerWins = 0;
     let validOutcomes = 0;
+    let totalTokens = 0;
+    let totalCost = 0;
 
     job.data.forEach(row => {
       // Clean currencies
@@ -96,6 +98,8 @@ export function Dashboard() {
 
       totalProviderOffer += parseAmount(row['Provider Offer Amount']);
       totalInsurerOffer += parseAmount(row['Insurance Offer Amount']);
+      totalTokens += Number(row['Tokens Used']) || 0;
+      totalCost += Number(row['Est. Cost ($)']) || 0;
 
       const outcome = String(row['Outcome'] || '').toLowerCase();
       if (outcome && outcome !== 'n/a') {
@@ -111,7 +115,9 @@ export function Dashboard() {
       totalRows: job.data.length,
       providerTotal: totalProviderOffer,
       insurerTotal: totalInsurerOffer,
-      winRate: validOutcomes > 0 ? ((providerWins / validOutcomes) * 100).toFixed(1) : 'N/A'
+      winRate: validOutcomes > 0 ? ((providerWins / validOutcomes) * 100).toFixed(1) : 'N/A',
+      tokens: totalTokens,
+      cost: totalCost
     };
   }, [job]);
 
@@ -244,6 +250,22 @@ export function Dashboard() {
             <div>
               <p className="text-sm font-medium text-slate-500 mb-1">Total Insurer Offers</p>
               <h3 className="text-xl font-bold text-slate-800">${kpis.insurerTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</h3>
+            </div>
+          </div>
+          
+          <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm flex items-start gap-4 lg:col-span-2">
+            <div className="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+              <Zap size={24} />
+            </div>
+            <div className="flex gap-12">
+              <div>
+                 <p className="text-sm font-medium text-slate-500 mb-1">AI Tokens Used</p>
+                 <h3 className="text-2xl font-bold text-slate-800">{kpis.tokens.toLocaleString()}</h3>
+              </div>
+              <div>
+                 <p className="text-sm font-medium text-slate-500 mb-1">Estimated API Cost</p>
+                 <h3 className="text-2xl font-bold text-slate-800">${kpis.cost.toFixed(4)}</h3>
+              </div>
             </div>
           </div>
         </div>
