@@ -112,26 +112,31 @@ def process_single_pdf(pdf_path: str, columns: list, api_key: str, learning_rule
         regex_hints = extract_regex_patterns(text)
         
         # AGGRESSIVE TOKEN OPTIMIZATION: Paragraph Filtering WITH Date Preservation
-        keywords = [col.get('name', col).lower() if isinstance(col, dict) else col.lower() for col in columns]
-        keywords.extend(['offer', 'determination', 'idr', 'npi', 'date', 'amount', 'decision', 'patient', 'claim', 'dob', 'dos'])
-        
-        # Regex to catch ANY date pattern to prevent N/A (e.g. 01/01/2024 or Jan 1, 2024)
-        date_pattern = re.compile(r'\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* \d{1,2},? \d{4}\b', re.IGNORECASE)
-        
-        paragraphs = text.replace('\r', '').split('\n\n')
-        if len(paragraphs) < 5:
-            paragraphs = text.split('\n')
+        # Skip filtering entirely for standard 1-4 page docs; 12,000 chars natively costs < $0.0004!
+        if len(text) > 12000:
+            keywords = [col.get('name', col).lower() if isinstance(col, dict) else col.lower() for col in columns]
+            keywords.extend(['offer', 'determination', 'idr', 'npi', 'date', 'amount', 'decision', 'patient', 'claim', 'dob', 'dos'])
             
-        filtered_paragraphs = []
-        for p in paragraphs:
-            # Always keep short structural lines (headers), lines containing keywords, OR lines containing ANY date
-            if len(p.strip()) < 100 or date_pattern.search(p) or any(k in p.lower() for k in keywords):
-                filtered_paragraphs.append(p)
+            # Regex to catch ANY date pattern to prevent N/A (e.g. 01/01/2024 or Jan 1, 2024)
+            date_pattern = re.compile(r'\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* \d{1,2},? \d{4}\b', re.IGNORECASE)
+            
+            # Regex to catch Determination Numbers like DISP-1234 or D-5678 to prevent N/A
+            det_pattern = re.compile(r'\b(?:disp|det|determination|number)\s*[-#:]?\s*([a-z0-9-]{6,})\b', re.IGNORECASE)
+            
+            paragraphs = text.replace('\r', '').split('\n\n')
+            if len(paragraphs) < 5:
+                paragraphs = text.split('\n')
                 
-        filtered_text = "\n".join(filtered_paragraphs)
-        
-        if len(filtered_text) > 500 and len(filtered_text) < len(text):
-            text = filtered_text
+            filtered_paragraphs = []
+            for p in paragraphs:
+                # Always keep short structural lines (headers), lines containing keywords, ANY date, or det ID
+                if len(p.strip()) < 100 or date_pattern.search(p) or det_pattern.search(p) or any(k in p.lower() for k in keywords):
+                    filtered_paragraphs.append(p)
+                    
+            filtered_text = "\n".join(filtered_paragraphs)
+            
+            if len(filtered_text) > 500 and len(filtered_text) < len(text):
+                text = filtered_text
 
     col_names = [col.get('name', col) if isinstance(col, dict) else col for col in columns]
 
