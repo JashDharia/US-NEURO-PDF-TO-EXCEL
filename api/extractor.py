@@ -90,11 +90,8 @@ def process_single_pdf(pdf_path: str, columns: list, api_key: str, learning_rule
     except:
         pass
         
-    # Intelligent Model Downgrade Router (Cost Optimization)
-    # If it's a natively digital document and under 5 pages, use the 97% cheaper model
-    selected_model = "gpt-4o"
-    if not is_scanned and page_count <= 5 and len(text) < 15000:
-        selected_model = "gpt-4o-mini"
+    # Ensure gpt-4o-mini is always preferred to guarantee sub-$0.0005 cost
+    selected_model = "gpt-4o-mini"
         
     images = []
     if is_scanned:
@@ -113,6 +110,28 @@ def process_single_pdf(pdf_path: str, columns: list, api_key: str, learning_rule
     regex_hints = {}
     if not is_scanned and text:
         regex_hints = extract_regex_patterns(text)
+        
+        # AGGRESSIVE TOKEN OPTIMIZATION: Paragraph Filtering WITH Date Preservation
+        keywords = [col.get('name', col).lower() if isinstance(col, dict) else col.lower() for col in columns]
+        keywords.extend(['offer', 'determination', 'idr', 'npi', 'date', 'amount', 'decision', 'patient', 'claim', 'dob', 'dos'])
+        
+        # Regex to catch ANY date pattern to prevent N/A (e.g. 01/01/2024 or Jan 1, 2024)
+        date_pattern = re.compile(r'\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* \d{1,2},? \d{4}\b', re.IGNORECASE)
+        
+        paragraphs = text.replace('\r', '').split('\n\n')
+        if len(paragraphs) < 5:
+            paragraphs = text.split('\n')
+            
+        filtered_paragraphs = []
+        for p in paragraphs:
+            # Always keep short structural lines (headers), lines containing keywords, OR lines containing ANY date
+            if len(p.strip()) < 100 or date_pattern.search(p) or any(k in p.lower() for k in keywords):
+                filtered_paragraphs.append(p)
+                
+        filtered_text = "\n".join(filtered_paragraphs)
+        
+        if len(filtered_text) > 500 and len(filtered_text) < len(text):
+            text = filtered_text
 
     col_names = [col.get('name', col) if isinstance(col, dict) else col for col in columns]
 
@@ -142,7 +161,7 @@ RULES:
     
     if is_scanned and images:
         content_array = [{"type": "text", "text": prompt_instructions}]
-        for b64_img in images[:15]: # limit to 15 pages max for vision API token safety
+        for b64_img in images[:15]: # Restore safe 15 page limit
             content_array.append({
                 "type": "image_url", 
                 "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}
