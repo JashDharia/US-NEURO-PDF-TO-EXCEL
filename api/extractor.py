@@ -34,8 +34,10 @@ def extract_regex_patterns(text: str) -> dict:
     claim_match = re.search(r'\b(?:Claim|Case)[^\w]{0,10}([A-Z0-9]{5,15})\b', text, re.IGNORECASE)
     if claim_match: found_data["Claim ID"] = claim_match.group(1)
     
-    date_match = re.search(r'\b(?:Date|DOS)[^\d]{0,5}(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b', text, re.IGNORECASE)
-    if date_match: found_data["Date"] = date_match.group(1)
+    # Grab the very first date in the document (usually the letter issuance date at the top)
+    # Catches: 12/09/2025, 2025-12-09, Jan 1, 2024, 12.09.2025
+    date_match = re.search(r'\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* \d{1,2},? \d{4}\b|\b\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}\b|\b\d{4}[-/\.]\d{1,2}[-/\.]\d{1,2}\b', text, re.IGNORECASE)
+    if date_match: found_data["Date"] = date_match.group(0)
     
     return found_data
 
