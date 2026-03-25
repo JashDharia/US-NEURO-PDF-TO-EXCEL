@@ -91,10 +91,9 @@ def process_single_pdf(pdf_path: str, columns: list, api_key: str, learning_rule
         pass
         
     # Model Downgrade Router (Cost Optimization)
-    # If it's a natively digital document and under 5 pages, use the 97% cheaper model
-    selected_model = "gpt-4o"
-    if not is_scanned and page_count <= 5 and len(text) < 15000:
-        selected_model = "gpt-4o-mini"
+    # Automatically routes to gpt-4o-mini to slash costs by 95% ($0.15/1M vs $2.50/1M tokens).
+    # gpt-4o-mini natively supports text and vision OCR perfectly for standard medical records.
+    selected_model = "gpt-4o-mini"
         
     images = []
     if is_scanned:
