@@ -90,8 +90,16 @@ def process_single_pdf(pdf_path: str, columns: list, api_key: str, learning_rule
     except:
         pass
         
+<<<<<<< HEAD
     # Ensure gpt-4o-mini is always preferred to guarantee sub-$0.0005 cost
     selected_model = "gpt-4o-mini"
+=======
+    # Model Downgrade Router (Cost Optimization)
+    # If it's a natively digital document and under 5 pages, use the 97% cheaper model
+    selected_model = "gpt-4o"
+    if not is_scanned and page_count <= 5 and len(text) < 15000:
+        selected_model = "gpt-4o-mini"
+>>>>>>> parent of 496c7635 (Update extractor.py)
         
     images = []
     if is_scanned:
