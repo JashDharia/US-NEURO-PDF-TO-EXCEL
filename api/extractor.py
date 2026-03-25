@@ -152,10 +152,11 @@ Extraction logic per field:
 
 RULES:
 1. A document may contain MULTIPLE records (e.g. multiple Determination blocks). Extract EVERY one — do not stop after the first.
-2. Keys must exactly match the field names listed above.
-3. Use "N/A" for any value that cannot be found.
-4. For the Date field: look for "period begins on", "determination date", or the letter issuance date. Should almost never be N/A.
-5. Return ONLY valid JSON — no markdown, no backticks, no commentary."""
+2. IMPORTANT: If the document has "global" or "header" data (like ONE Date, ONE IDRE Name, ONE Reference Number) but multiple individual line items (like multiple Provider Services or Amounts), you MUST duplicate the global header data into EVERY line item's JSON object. Do not create a separate incomplete record for just the header. Every record should be fully populated!
+3. Keys must exactly match the field names listed above.
+4. Use "N/A" for any value that cannot be found.
+5. For the Date field: look for "period begins on", "determination date", or the letter issuance date. Should almost never be N/A.
+6. Return ONLY valid JSON — no markdown, no backticks, no commentary."""
 
     if regex_hints:
          prompt_instructions += f"\n\nPRE-EXTRACTED HIGH-CONFIDENCE FIELDS (Use these if they match your requested fields):\n{json.dumps(regex_hints, indent=2)}"
