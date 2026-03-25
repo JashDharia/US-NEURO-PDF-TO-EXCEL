@@ -1,9 +1,43 @@
 import os
 import json
+import base64
+import re
 import pandas as pd
 import fitz  # PyMuPDF
 from litellm import completion
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+def extract_images_from_pdf(pdf_path: str) -> list:
+    """Extract pages as base64 images for OCR."""
+    images = []
+    try:
+        doc = fitz.open(pdf_path)
+        for page in doc:
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x zoom
+            img_bytes = pix.tobytes("jpeg")
+            b64 = base64.b64encode(img_bytes).decode("utf-8")
+            images.append(b64)
+        return images
+    except Exception as e:
+        print(f"Error converting PDF to images {pdf_path}: {e}")
+        return []
+
+
+def extract_regex_patterns(text: str) -> dict:
+    """Extract common fields using regex to reduce LLM workload and hallucinations."""
+    found_data = {}
+    npi_match = re.search(r'\b(?:NPI|Provider NPI)[^\d]{0,5}(\d{10})\b', text, re.IGNORECASE)
+    if npi_match: found_data["NPI"] = npi_match.group(1)
+    
+    claim_match = re.search(r'\b(?:Claim|Case)[^\w]{0,10}([A-Z0-9]{5,15})\b', text, re.IGNORECASE)
+    if claim_match: found_data["Claim ID"] = claim_match.group(1)
+    
+    date_match = re.search(r'\b(?:Date|DOS)[^\d]{0,5}(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b', text, re.IGNORECASE)
+    if date_match: found_data["Date"] = date_match.group(1)
+    
+    return found_data
 
 
 def extract_text_from_pdf(pdf_path: str) -> str:
@@ -43,8 +77,21 @@ def process_single_pdf(pdf_path: str, columns: list, api_key: str, learning_rule
     """Extract all records from a single PDF. Returns a list of row dicts."""
     filename = os.path.basename(pdf_path)
     text = extract_text_from_pdf(pdf_path)
+    
+    is_scanned = False
+    try:
+        doc = fitz.open(pdf_path)
+        if len(text.strip()) < len(doc) * 50:
+            is_scanned = True
+        doc.close()
+    except:
+        pass
+        
+    images = []
+    if is_scanned:
+        images = extract_images_from_pdf(pdf_path)
 
-    if not text.strip():
+    if not text.strip() and not images:
         row = {(col.get('name', col) if isinstance(col, dict) else col): f"Empty/Unreadable PDF: {filename}" for col in columns}
         row['Source File'] = filename
         return [row]
@@ -54,9 +101,13 @@ def process_single_pdf(pdf_path: str, columns: list, api_key: str, learning_rule
         row['Source File'] = filename
         return [row]
 
+    regex_hints = {}
+    if not is_scanned and text:
+        regex_hints = extract_regex_patterns(text)
+
     col_names = [col.get('name', col) if isinstance(col, dict) else col for col in columns]
 
-    prompt = f"""You are an advanced data extraction assistant. You process medical documents (IDR determinations, EOBs, records, etc.).{learning_rules}
+    prompt_instructions = f"""You are an advanced data extraction assistant. You process medical documents (IDR determinations, EOBs, records, etc.).{learning_rules}
 
 Extract ALL records from the document below. Return a JSON object with one key "records" whose value is an array of objects.
 
@@ -71,60 +122,93 @@ RULES:
 2. Keys must exactly match the field names listed above.
 3. Use "N/A" for any value that cannot be found.
 4. For the Date field: look for "period begins on", "determination date", or the letter issuance date. Should almost never be N/A.
-5. Return ONLY valid JSON — no markdown, no backticks, no commentary.
+5. Return ONLY valid JSON — no markdown, no backticks, no commentary."""
 
-DOCUMENT TEXT:
-{text[:40000]}"""
+    if regex_hints:
+         prompt_instructions += f"\n\nPRE-EXTRACTED HIGH-CONFIDENCE FIELDS (Use these if they match your requested fields):\n{json.dumps(regex_hints, indent=2)}"
 
-    try:
-        response = completion(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}],
-            api_key=api_key,
-            temperature=0.1,
-            response_format={"type": "json_object"},  # Forces clean JSON — no markdown wrapping
-        )
-        content = response.choices[0].message.content.strip()
-        parsed = json.loads(content)
+    chunk_results = []
+    
+    if is_scanned and images:
+        content_array = [{"type": "text", "text": prompt_instructions}]
+        for b64_img in images[:15]: # limit to 15 pages max for vision API token safety
+            content_array.append({
+                "type": "image_url", 
+                "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}
+            })
+        messages = [{"role": "user", "content": content_array}]
+        
+        try:
+            response = completion(
+                model="gpt-4o",
+                messages=messages,
+                api_key=api_key,
+                temperature=0.1,
+                response_format={"type": "json_object"},
+            )
+            content = response.choices[0].message.content.strip()
+            chunk_results.extend(_parse_llm_json(content))
+        except Exception as e:
+            print(f"Vision API Error: {e}")
+            
+    else:
+        # Text Chunking logic
+        CHUNK_SIZE = 20000 
+        text_chunks = [text[i:i+CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]
+        
+        # Limit to 2 chunks to avoid massive Vercel timeouts, but capture 40K chars
+        for chunk in text_chunks[:2]:
+            full_text_prompt = f"{prompt_instructions}\n\nDOCUMENT TEXT CHUNK:\n{chunk}"
+            messages = [{"role": "user", "content": full_text_prompt}]
+            try:
+                response = completion(
+                    model="gpt-4o",
+                    messages=messages,
+                    api_key=api_key,
+                    temperature=0.1,
+                    response_format={"type": "json_object"},
+                )
+                content = response.choices[0].message.content.strip()
+                chunk_results.extend(_parse_llm_json(content))
+            except Exception as e:
+                print(f"LLM Chunk Error: {e}")
 
-        # Accept {"records": [...]} wrapper or bare list/dict
-        if isinstance(parsed, dict) and "records" in parsed:
-            data = parsed["records"]
-        elif isinstance(parsed, list):
-            data = parsed
-        elif isinstance(parsed, dict):
-            data = [parsed]
-        else:
-            data = []
-
-        if not data:
-            row = {col_name: "No Data Found" for col_name in col_names}
-            row['Source File'] = filename
-            return [row]
-
-        results = []
-        for item in data:
-            clean = {col_name: item.get(col_name, "N/A") for col_name in col_names}
-            clean['Source File'] = filename
-            results.append(clean)
-        return results
-
-    except Exception as e:
-        print(f"LLM Extraction Error for {pdf_path}: {e}")
-        row = {col_name: f"Extraction Error: {str(e)}" for col_name in col_names}
+    if not chunk_results:
+        row = {col_name: "No Data Found or Error" for col_name in col_names}
         row['Source File'] = filename
         return [row]
+
+    # Clean and format results
+    results = []
+    for item in chunk_results:
+        clean = {col_name: item.get(col_name, "N/A") for col_name in col_names}
+        clean['Source File'] = filename
+        results.append(clean)
+    return results
+
+def _parse_llm_json(content: str) -> list:
+    """Helper to parse JSON from LLM into a list of dicts."""
+    try:
+        parsed = json.loads(content)
+        if isinstance(parsed, dict) and "records" in parsed:
+            return parsed["records"]
+        elif isinstance(parsed, list):
+            return parsed
+        elif isinstance(parsed, dict):
+            return [parsed]
+        return []
+    except:
+        return []
 
 
 def process_pdfs_to_excel(pdf_paths: list, columns: list) -> str:
     """
     Process all PDFs in parallel (one thread per PDF) and write a combined Excel file.
-    With N files, wall-clock time ≈ time for the slowest single file instead of sum of all.
+    Wall-clock time ≈ time for the slowest single file instead of sum of all.
     """
     api_key = os.environ.get("OPENAI_API_KEY")
     learning_rules = get_learning_rules()
 
-    # Cap at 10 concurrent workers to stay within OpenAI rate limits
     max_workers = min(len(pdf_paths), 10)
     results_by_index: dict[int, list] = {}
 
@@ -151,7 +235,6 @@ def process_pdfs_to_excel(pdf_paths: list, columns: list) -> str:
 
     df = pd.DataFrame(all_extracted_data)
 
-    # Move Source File to the first column
     cols = df.columns.tolist()
     if 'Source File' in cols:
         cols.insert(0, cols.pop(cols.index('Source File')))

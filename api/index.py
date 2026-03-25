@@ -17,6 +17,8 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 import uuid
+import hashlib
+from io import StringIO
 
 # Initialize Database
 DB_PATH = "/tmp/history.db"
@@ -54,6 +56,12 @@ def init_db():
                 result_json TEXT NOT NULL
             )
         ''')
+        
+    try:
+        cursor.execute("ALTER TABLE extraction_jobs ADD COLUMN file_hash TEXT")
+    except Exception:
+        pass # Column already exists
+        
     conn.commit()
     conn.close()
 
@@ -91,38 +99,72 @@ async def extract_pdfs(
         raise HTTPException(status_code=400, detail="Invalid columns format.")
     
     temp_paths = []
+    hasher = hashlib.md5()
+    
     for file in valid_files:
+        content = await file.read()
+        hasher.update(content)
         temp_path = f"/tmp/{file.filename}"
         with open(temp_path, "wb") as f:
-            f.write(await file.read())
+            f.write(content)
         temp_paths.append(temp_path)
         
+    combined_hash = hasher.hexdigest()
+        
     try:
-        # Process the PDFs and get a single Excel file path back
+        conn, is_postgres = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Check cache
+        if is_postgres:
+             cursor.execute("SELECT id, result_json FROM extraction_jobs WHERE file_hash = %s", (combined_hash,))
+        else:
+             cursor.execute("SELECT id, result_json FROM extraction_jobs WHERE file_hash = ?", (combined_hash,))
+             
+        cached_row = cursor.fetchone()
+        
+        if cached_row:
+             job_id = cached_row[0] if is_postgres else cached_row["id"]
+             result_json = cached_row[1] if is_postgres else cached_row["result_json"]
+             
+             df = pd.read_json(StringIO(result_json), orient='records')
+             
+             output_filename = (
+                valid_files[0].filename + "_extracted.xlsx"
+                if len(valid_files) == 1
+                else "US_Neuro_Batch_Extraction.xlsx"
+             )
+             output_path = f"/tmp/{output_filename}"
+             df.to_excel(output_path, index=False)
+             
+             conn.close()
+             return {
+                 "status": "success", 
+                 "job_id": job_id,
+                 "excel_url": f"/api/download?file={output_filename}",
+                 "cached": True
+             }
+             
+        # Process the PDFs if no cache hit
         excel_path = process_pdfs_to_excel(temp_paths, col_list)
         
-        # We also need the raw JSON to store in history to power the dashboard
         df = pd.read_excel(excel_path)
-        # Handle NaN/inf for JSON conversion
         df = df.fillna("N/A") 
         raw_json_str = df.to_json(orient='records')
         
-        # Save to SQLite
         job_id = str(uuid.uuid4())
         file_names_str = json.dumps([f.filename for f in valid_files])
         current_time = datetime.utcnow().isoformat()
         
-        conn, is_postgres = get_db_connection()
-        cursor = conn.cursor()
         if is_postgres:
             cursor.execute(
-                "INSERT INTO extraction_jobs (id, created_at, file_names, result_json) VALUES (%s, %s, %s, %s)",
-                (job_id, current_time, file_names_str, raw_json_str)
+                "INSERT INTO extraction_jobs (id, created_at, file_names, result_json, file_hash) VALUES (%s, %s, %s, %s, %s)",
+                (job_id, current_time, file_names_str, raw_json_str, combined_hash)
             )
         else:
             cursor.execute(
-                "INSERT INTO extraction_jobs (id, created_at, file_names, result_json) VALUES (?, ?, ?, ?)",
-                (job_id, current_time, file_names_str, raw_json_str)
+                "INSERT INTO extraction_jobs (id, created_at, file_names, result_json, file_hash) VALUES (?, ?, ?, ?, ?)",
+                (job_id, current_time, file_names_str, raw_json_str, combined_hash)
             )
         conn.commit()
         conn.close()
@@ -130,7 +172,8 @@ async def extract_pdfs(
         return {
             "status": "success", 
             "job_id": job_id,
-            "excel_url": f"/api/download?file={os.path.basename(excel_path)}"
+            "excel_url": f"/api/download?file={os.path.basename(excel_path)}",
+            "cached": False
         }
     except Exception as e:
         import traceback
@@ -238,9 +281,8 @@ async def generate_logic(
         with open(temp_path, "wb") as f:
             f.write(await file.read())
         try:
-            # Only read the first few pages for context to save tokens/time
             extracted = extract_text_from_pdf(temp_path)
-            context_text = extracted[:15000] 
+            context_text = extracted[:15000]
         except Exception as e:
             print(f"Context extraction error: {e}")
         finally:
