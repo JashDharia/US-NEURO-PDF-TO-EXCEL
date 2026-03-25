@@ -109,7 +109,7 @@ async def extract_pdfs(
             f.write(content)
         temp_paths.append(temp_path)
         
-    combined_hash = "v4_" + hasher.hexdigest()
+    combined_hash = "v5_" + hasher.hexdigest()
         
     try:
         conn, is_postgres = get_db_connection()

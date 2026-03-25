@@ -193,11 +193,8 @@ RULES:
             
     else:
         # VERCEL TIMEOUT PREVENT: Limit to exactly ONE API call per document to stay under 10 seconds.
-        # If the document is huge, elegantly stitch the first 12,000 and last 8,000 characters to preserve Header Dates and Footer Signatures.
-        if len(text) > 20000:
-            chunk = text[:12000] + "\n\n... [SNIP: MIDDLE VERBIAGE REMOVED TO PREVENT TIMEOUT] ...\n\n" + text[-8000:]
-        else:
-            chunk = text
+        # Since we already heavily paragraph-filtered the text above, we aggressively pass the pure, filtered document into a single LLM call.
+        chunk = text
             
         full_text_prompt = f"{prompt_instructions}\n\nDOCUMENT TEXT:\n{chunk}"
         messages = [{"role": "user", "content": full_text_prompt}]
