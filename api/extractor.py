@@ -151,11 +151,11 @@ Extraction logic per field:
 {json.dumps(columns, indent=2)}
 
 RULES:
-1. A document may contain MULTIPLE records (e.g. multiple Determination blocks). Extract EVERY one — do not stop after the first.
-2. IMPORTANT: If the document has "global" or "header" data (like ONE Date, ONE IDRE Name, ONE Reference Number) but multiple individual line items (like multiple Provider Services or Amounts), you MUST duplicate the global header data into EVERY line item's JSON object. Do not create a separate incomplete record for just the header. Every record should be fully populated!
-3. Keys must exactly match the field names listed above.
-4. Use "N/A" for any value that cannot be found.
-5. For the Date field: look for "period begins on", "determination date", or the letter issuance date. Should almost never be N/A.
+1. Extract EVERY record (e.g., multiple Determination blocks/line items) — do not stop after the first.
+2. 🚨 CRITICAL DATE RULE 🚨: Find the single global "Date" (e.g. letter issuance date, determination date) at the top of the document. You MUST copy this EXACT Date into EVERY single line item record's "Date" field. DO NOT put "N/A" for Date on some rows and a Date on one row. EVERY row MUST have the Date.
+3. 🚨 DETERMINATION NUMBER RULE 🚨: If the document is a single determination, the Determination Number is "1". If there are multiple line items, number them sequentially "1", "2", "3", etc. NEVER put "N/A" for Determination Number!
+4. Do NOT create a weird isolated extra row just for global header data. 
+5. Keys must exactly match the field names listed above. Use "N/A" for any missing value.
 6. Return ONLY valid JSON — no markdown, no backticks, no commentary."""
 
     if regex_hints:
