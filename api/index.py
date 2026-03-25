@@ -127,7 +127,7 @@ async def extract_pdfs(
              job_id = cached_row[0] if is_postgres else cached_row["id"]
              result_json = cached_row[1] if is_postgres else cached_row["result_json"]
              
-             df = pd.read_json(StringIO(result_json), orient='records')
+             df = pd.read_json(StringIO(result_json), orient='records', convert_dates=False)
              
              output_filename = (
                 valid_files[0].filename + "_extracted.xlsx"
