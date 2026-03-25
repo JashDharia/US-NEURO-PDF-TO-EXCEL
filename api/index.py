@@ -177,8 +177,9 @@ async def extract_pdfs(
         }
     except Exception as e:
         import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        tb = traceback.format_exc()
+        print(tb)
+        raise HTTPException(status_code=500, detail=f"Server Error: {str(e)}\nTraceback: {tb}")
     finally:
         for temp_path in temp_paths:
             if os.path.exists(temp_path):

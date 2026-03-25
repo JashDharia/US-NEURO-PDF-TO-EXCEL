@@ -166,7 +166,7 @@ RULES:
     
     if is_scanned and images:
         content_array = [{"type": "text", "text": prompt_instructions}]
-        for b64_img in images[:15]: # Restore safe 15 page limit
+        for b64_img in images[:4]: # VERCEL TIMEOUT PREVENT: Limit to 4 pages to stay under 10 seconds
             content_array.append({
                 "type": "image_url", 
                 "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}
@@ -198,8 +198,8 @@ RULES:
         CHUNK_SIZE = 20000 
         text_chunks = [text[i:i+CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]
         
-        # Limit to 2 chunks to avoid massive Vercel timeouts, but capture 40K chars
-        for chunk in text_chunks[:2]:
+        # VERCEL TIMEOUT PREVENT: Limit to 1 chunk. (2 chunks takes 15s+, causing 504 Gateway Timeout)
+        for chunk in text_chunks[:1]:
             full_text_prompt = f"{prompt_instructions}\n\nDOCUMENT TEXT CHUNK:\n{chunk}"
             messages = [{"role": "user", "content": full_text_prompt}]
             try:
