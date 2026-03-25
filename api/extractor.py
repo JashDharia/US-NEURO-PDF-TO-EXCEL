@@ -4,7 +4,7 @@ import base64
 import re
 import pandas as pd
 import fitz  # PyMuPDF
-from litellm import completion
+from litellm import completion, completion_cost
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -79,13 +79,22 @@ def process_single_pdf(pdf_path: str, columns: list, api_key: str, learning_rule
     text = extract_text_from_pdf(pdf_path)
     
     is_scanned = False
+    page_count = 1
+    # If very little text is found compared to page count, assume scanned
     try:
         doc = fitz.open(pdf_path)
-        if len(text.strip()) < len(doc) * 50:
+        page_count = len(doc)
+        if len(text.strip()) < page_count * 50:
             is_scanned = True
         doc.close()
     except:
         pass
+        
+    # Model Downgrade Router (Cost Optimization)
+    # If it's a natively digital document and under 5 pages, use the 97% cheaper model
+    selected_model = "gpt-4o"
+    if not is_scanned and page_count <= 5 and len(text) < 15000:
+        selected_model = "gpt-4o-mini"
         
     images = []
     if is_scanned:
@@ -128,6 +137,8 @@ RULES:
          prompt_instructions += f"\n\nPRE-EXTRACTED HIGH-CONFIDENCE FIELDS (Use these if they match your requested fields):\n{json.dumps(regex_hints, indent=2)}"
 
     chunk_results = []
+    total_tokens = 0
+    total_cost = 0.0
     
     if is_scanned and images:
         content_array = [{"type": "text", "text": prompt_instructions}]
@@ -140,12 +151,19 @@ RULES:
         
         try:
             response = completion(
-                model="gpt-4o",
+                model=selected_model,
                 messages=messages,
                 api_key=api_key,
                 temperature=0.1,
                 response_format={"type": "json_object"},
             )
+            if hasattr(response, 'usage') and response.usage:
+                total_tokens += response.usage.total_tokens
+            try:
+                total_cost += completion_cost(completion_response=response)
+            except:
+                pass
+                
             content = response.choices[0].message.content.strip()
             chunk_results.extend(_parse_llm_json(content))
         except Exception as e:
@@ -162,12 +180,18 @@ RULES:
             messages = [{"role": "user", "content": full_text_prompt}]
             try:
                 response = completion(
-                    model="gpt-4o",
+                    model=selected_model,
                     messages=messages,
                     api_key=api_key,
                     temperature=0.1,
                     response_format={"type": "json_object"},
                 )
+                if hasattr(response, 'usage') and response.usage:
+                    total_tokens += response.usage.total_tokens
+                try:
+                    total_cost += completion_cost(completion_response=response)
+                except:
+                    pass
                 content = response.choices[0].message.content.strip()
                 chunk_results.extend(_parse_llm_json(content))
             except Exception as e:
@@ -183,6 +207,8 @@ RULES:
     for item in chunk_results:
         clean = {col_name: item.get(col_name, "N/A") for col_name in col_names}
         clean['Source File'] = filename
+        clean['Tokens Used'] = total_tokens
+        clean['Est. Cost ($)'] = round(total_cost, 4)
         results.append(clean)
     return results
 
